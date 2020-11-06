@@ -36,9 +36,13 @@ class WallCollisionHandler:
         self._i = i
         # self._j is the velocity coordinate that we will invert on collision
         self._j = -1 # invalid assignment, will be set in predict()
+        self.idxs = [i]
+        self.count = particle.count[i]
 
     def unfold(self):
-        self._particle.vel[self._i, self._j] *= -1
+        if self.count == self._particle.count[self._i]:
+            self._particle.vel[self._i, self._j] *= -1
+            self._particle.count[self._i] += 1
 
     def predict(self):
         particle = self._particle
@@ -66,29 +70,36 @@ class ParticleCollisionHandler:
         self._particle = particle
         self._i1 = i1
         self._i2 = i2
+        self.idxs = [i1, i2]
+        self._count1 = particle.count[i1]
+        self._count2 = particle.count[i2]
 
     def unfold(self):
-        dif = self._particle.pos[self._i1] - self._particle.pos[self._i2]
-        proj = inner(self._particle.vel[self._i1] - self._particle.vel[self._i2], dif) / norm(dif)**2 * dif
-        self._particle.vel[self._i1] -= proj
-        self._particle.vel[self._i2] += proj
+        if self._count1 == self._particle.count[self._i1] and self._count2 == self._particle.count[self._i2]:
+            dif = self._particle.pos[self._i1] - self._particle.pos[self._i2]
+            proj = inner(self._particle.vel[self._i1] - self._particle.vel[self._i2], dif) / norm(dif)**2 * dif
+            self._particle.vel[self._i1] -= proj
+            self._particle.vel[self._i2] += proj
+            self._particle.count[self._i1] += 1
+            self._particle.count[self._i2] += 1
 
     def predict(self):
         dif = self._particle.pos[self._i1] - self._particle.pos[self._i2]
         veldif = self._particle.vel[self._i1] - self._particle.vel[self._i2]
+        b = inner(dif, veldif)
+        if b >= 0:
+            return None
         r = (self._particle.rad[self._i1] + self._particle.rad[self._i2])[0]
         a = norm(veldif)**2
-        b = 2 * inner(dif, veldif)
         c = norm(dif)**2 - r**2
-        D = b**2 - 4 * a * c
+        D = b**2 - a * c
         if D < 0:
-            return np.inf
+            return None
         else:
-            t = min((- b + D**(1/2)) / (2 * a),
-                    (- b - D**(1/2)) / (2 * a))
-            if t <= 0:
-                return np.inf
-            else:
+            t = -(b + D**(1/2)) / a
+            if t * norm(self._particle.vel[self._i1]) <= 1:
+                # if t violates this condition, it is so far into the future that the particle escapes
+                # the simulation box
                 return t
 
 class Particle:
@@ -100,39 +111,51 @@ class Particle:
         self.vel = vel
         self.rad = rad
         self.count = np.zeros(shape=(pos.shape[0]))
-
+        self._count = 0 # count for breaking ties
+        
         # event-driven simulation
         self._t = 0.0 # time
         pq = [] # priority queue
         for i in range(pos.shape[0]):
             handler = WallCollisionHandler(self, i)
             t = handler.predict()
-            heappush(pq, (t, handler))
+            heappush(pq, (t, self._count, handler))
+            self._count += 1
         for i in range(pos.shape[0]):
             for j in range(i):
                 handler = ParticleCollisionHandler(self, i, j)
                 t = handler.predict()
-                if t != np.inf:
-                    heappush(pq, (t, handler))
+                if t:
+                    heappush(pq, (t, self._count, handler))
+                    self._count += 1
         self._pq = pq
         self._next_event = heappop(pq)
 
     def advance_to(self, t):
+        print(len(self._pq))
         while(self._next_event[0] <= t):
             # move particles into place
             self.pos += (self._next_event[0] - self._t) * self.vel
             self._t = self._next_event[0]
-            
+
             # let the next event unfold
-            handler = self._next_event[1]
+            handler = self._next_event[-1]
             handler.unfold()
             
             # push new event onto priority queue
-            dt = handler.predict()
-            if dt != np.inf:
-                self._next_event = heappushpop(self._pq, (self._t + dt, handler))
-            else:
-                self._next_event = heappop(self._pq)
+            for i in handler.idxs:
+                handler = WallCollisionHandler(self, i)
+                dt = handler.predict()
+                heappush(self._pq, (self._t + dt, self._count, handler))
+                self._count += 1
+                for j in range(self.pos.shape[0]):
+                    if j != i:
+                        handler = ParticleCollisionHandler(self, i, j)
+                        dt = handler.predict()
+                        if dt:
+                            heappush(self._pq, (self._t + dt, self._count, handler))
+                            self._count += 1
+            self._next_event = heappop(self._pq)
         # after this: self._next_event[0] > t
         
         # move particles the rest of the way

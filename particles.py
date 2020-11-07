@@ -11,7 +11,9 @@ from matplotlib.lines import Line2D
 from numpy import inner
 from numpy.linalg import norm
 from math import pi
+import itertools
 from heapq import *
+from heapdict import heapdict
 
 # modified from https://stackoverflow.com/questions/19394505/expand-the-line-with-specified-width-in-data-unit/42972469#42972469
 class LineDataMarkerSize(Line2D):
@@ -117,7 +119,7 @@ class Particle:
         self.vel = vel
         self.rad = rad
         self.count = np.zeros(shape=(pos.shape[0]))
-        self._count = 0 # count for breaking ties
+        self._counter = itertools.count() # count for breaking ties
         
         # event-driven simulation
         self._t = 0.0 # time
@@ -125,15 +127,13 @@ class Particle:
         for i in range(pos.shape[0]):
             handler = WallCollisionHandler(self, i)
             t = handler.predict()
-            heappush(pq, (t, self._count, handler))
-            self._count += 1
+            heappush(pq, (t, next(self._counter), handler))
         for i in range(pos.shape[0]):
             for j in range(i):
                 handler = ParticleCollisionHandler(self, i, j)
                 t = handler.predict()
                 if t:
-                    heappush(pq, (t, self._count, handler))
-                    self._count += 1
+                    heappush(pq, (t, next(self._counter), handler))
         self._pq = pq
         self._next_event = heappop(pq)
 
@@ -151,15 +151,13 @@ class Particle:
             for i in handler.idxs:
                 handler = WallCollisionHandler(self, i)
                 dt = handler.predict()
-                heappush(self._pq, (self._t + dt, self._count, handler))
-                self._count += 1
+                heappush(self._pq, (self._t + dt, next(self._counter), handler))
                 for j in range(self.pos.shape[0]):
                     if j != i:
                         handler = ParticleCollisionHandler(self, i, j)
                         dt = handler.predict()
                         if dt:
-                            heappush(self._pq, (self._t + dt, self._count, handler))
-                            self._count += 1
+                            heappush(self._pq, (self._t + dt, next(self._counter), handler))
             self._next_event = heappop(self._pq)
         # after this: self._next_event[0] > t
         

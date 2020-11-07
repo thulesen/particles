@@ -1,3 +1,9 @@
+# This project simulates wall and interparticular collisions for an arbitrary number of particles.
+# The simulation is event-driven and implemented with a priority queue.
+# As the simulation proceeds, it gets progressively slower because the queue fills up with invalid
+# events. Better performance could be achieved if we knew in advance the simulation duration so we could
+# discard some of these events that occur too far in the future.
+
 import numpy as np
 from matplotlib import pyplot as plt
 from matplotlib import animation
@@ -132,7 +138,6 @@ class Particle:
         self._next_event = heappop(pq)
 
     def advance_to(self, t):
-        print(len(self._pq))
         while(self._next_event[0] <= t):
             # move particles into place
             self.pos += (self._next_event[0] - self._t) * self.vel
@@ -170,7 +175,6 @@ radius = 0.01
 shape = (n_particles, 2)
 rng = np.random.default_rng()
 pos = (1 - 2 * radius) * rng.random(shape) + radius
-#pos = np.array(n_particles * [[0.5, 0.5]])
 vel = rng.random(shape)
 vel = vel / np.linalg.norm(vel)
 rad = np.array(n_particles * [radius]).reshape((n_particles, 1))

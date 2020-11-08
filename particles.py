@@ -1,12 +1,9 @@
 # This project simulates wall and interparticular collisions for an arbitrary number of particles.
 # The simulation is event-driven and implemented with a priority queue.
-# As the simulation proceeds, it gets progressively slower because the queue fills up with invalid
-# events. Better performance could be achieved if we knew in advance the simulation duration so we could
-# discard some of these events that occur too far in the future.
 
 import numpy as np
 from matplotlib import pyplot as plt
-from matplotlib import animation
+from matplotlib.animation import FuncAnimation
 from matplotlib.lines import Line2D
 from numpy import inner
 from numpy.linalg import norm
@@ -16,6 +13,7 @@ from heapq import *
 from heapdict import heapdict
 
 # modified from https://stackoverflow.com/questions/19394505/expand-the-line-with-specified-width-in-data-unit/42972469#42972469
+# license: https://creativecommons.org/licenses/by-sa/3.0/
 class LineDataMarkerSize(Line2D):
     def __init__(self, *args, **kwargs):
         _ms_data = kwargs.pop("markersize", 1)
@@ -31,8 +29,8 @@ class LineDataMarkerSize(Line2D):
             return 1
 
     def _set_ms(self, ms):
-        pass
-        #self._ms_data = ms
+        #pass
+        self._ms_data = ms
 
     _markersize = property(_get_ms, _set_ms)
 
@@ -88,13 +86,13 @@ class ParticleCollisionHandler:
         veldif = self._particle.vel[self._i1] - self._particle.vel[self._i2]
         b = inner(dif, veldif)
         if b >= 0:
-            return np.inf
+            return None
         r = (self._particle.rad[self._i1] + self._particle.rad[self._i2])[0]
         a = norm(veldif)**2
         c = norm(dif)**2 - r**2
         D = b**2 - a * c
         if D < 0:
-            return np.inf
+            return None
         else:
             return -(b + D**(1/2)) / a
 
@@ -117,14 +115,16 @@ class Particle:
             handler = WallCollisionHandler(self, i)
             handlers[i].append(handler)
             t = handler.predict()
-            hd[handler] = (t, next(counter))
+            if t:
+                hd[handler] = (t, next(counter))
         for i in range(pos.shape[0]):
             for j in range(i):
                 handler = ParticleCollisionHandler(self, i, j)
                 handlers[i].append(handler)
                 handlers[j].append(handler)
                 t = handler.predict()
-                hd[handler] = (t, next(counter))
+                if t:
+                    hd[handler] = (t, next(counter))
         self._handlers = handlers
         self._hd = hd
         self._next_event = hd.popitem()
@@ -143,7 +143,10 @@ class Particle:
             for i in handler.idxs:
                 for handler in self._handlers[i]:
                     dt = handler.predict()
-                    self._hd[handler] = (self._t + dt, next(self._counter))
+                    if dt:
+                        self._hd[handler] = (self._t + dt, next(self._counter))
+                    elif handler in self._hd.keys():
+                        del self._hd[handler]
 
             self._next_event = self._hd.popitem()
         # after this: self._next_event[0] > t
@@ -153,40 +156,33 @@ class Particle:
         self._t = t
 
 # overall parameters
-n_particles = 20
+n_particles = 100
 radius = 0.01
 
 # Create simulation objects
 shape = (n_particles, 2)
 rng = np.random.default_rng()
 pos = (1 - 2 * radius) * rng.random(shape) + radius
-vel = rng.random(shape)
+vel = rng.random(shape) - 0.5
 vel = vel / np.linalg.norm(vel)
 rad = np.array(n_particles * [radius]).reshape((n_particles, 1))
 particle_sim = Particle(pos, vel, rad)
 
-# First set up the figure, the axis, and the plot element we want to animate
+line = LineDataMarkerSize([], [], marker='o', ls=' ', markersize=2 * radius)
+
+#fig, ax = plt.subplots()
 fig = plt.figure()
-ax = plt.axes(xlim=(0, 1), ylim=(0, 1), aspect='equal')
-particle_plot = LineDataMarkerSize([], [], marker='o', ls=' ', markersize=2 * radius)
-ax.add_line(particle_plot)
+ax = fig.add_subplot(xlim=(0, 1), ylim=(0, 1), aspect='equal')
+ax.add_line(line)
 
-# initialization function: plot the background of each frame
 def init():
-    #particle_plot.set_data([], [])
-    return particle_plot,
+    return line,
 
-# animation function.  This is called sequentially
-dt = 1 / 60.
-def animate(i):
-    global dt
-    particle_sim.advance_to(i * dt)
-    pos = particle_sim.pos
-    
-    particle_plot.set_data(pos[:, 0], pos[:, 1])
-    return particle_plot,
+def update(frame):
+    particle_sim.advance_to(frame / 60.)
+    line.set_data(particle_sim.pos.T)
+    return line,
 
-# call the animator.  blit=True means only re-draw the parts that have changed.
-anim = animation.FuncAnimation(fig, animate, init_func=init, interval=20, blit=True)
+ani = FuncAnimation(fig, update, init_func=init, interval=20, blit=True)
 
 plt.show()
